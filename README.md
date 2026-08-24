@@ -8,10 +8,46 @@
 
 - **⚡ Sub-5ms Real-Time Latency**: Average inference speed of **~2.1 ms per call transcript**, designed for live on-device call monitoring.
 - **🧬 Layer 1 Hybrid Ensemble**: Combines rule-based keyword & regex pattern extraction (**40%**) with a calibrated semantic vector layer (**60%**).
+- **🎙️ Streaming Audio Pipeline**: Integrated ring buffer, VAD energy gating, 500ms audio chunking, and token-level transcript deduplication.
 - **🇮🇳 India-Specific Scam Coverage**: Tailored detection rules and vocabulary for Digital Arrest, UPI collect requests, TRAI/SIM deactivation, and Hinglish phrasing.
 - **🎯 False Positive Mitigation**: Intelligent risk capping prevents aggressive telemarketing or sales calls from triggering false CRITICAL alerts.
-- **🔄 Streaming Transcript Support**: `StreamingScamDetector` handles live partial audio transcripts with rolling window evidence accumulation.
 - **🔒 100% Local & Offline**: Operates fully on-device without external API calls, ensuring absolute privacy for call transcripts.
+
+---
+
+## 🎙️ Audio Chunking & Streaming ASR Architecture
+
+```
+[ Live Call Audio: 16kHz 16-bit Mono PCM ]
+                    │
+                    ▼
+┌────────────────────────────────────────────────────────┐
+│ Ring Buffer & VAD Pre-Filter (RMS Energy Gate)        │
+│ • Frame Slices: 500ms (8,000 samples)                  │
+│ • Discard non-speech frames (< 0.012 RMS threshold)    │
+└───────────────────────────┬────────────────────────────┘
+                            │ (Speech Detected)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Overlap Sliding Context Buffer                         │
+│ • Total Window: 2.0s (32,000 samples)                  │
+│ • Stride / Step: 500ms (8,000 samples)                 │
+│ • Overlap: 1.5s context retention                      │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Streaming ASR Backend (Moonshine-Tiny / Conformer CTC) │
+│ • Greedy CTC / Streaming Tokenizer                     │
+│ • Overlap Text Deduplication & Transcript Alignment    │
+└───────────────────────────┬────────────────────────────┘
+                            │ Emitted Transcript Deltas
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ StreamingScamDetector.process_chunk()                  │
+│ • Rolling 150-word ensemble evaluation (< 3ms)         │
+└────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -37,6 +73,9 @@ python main.py
 # Run interactive demo with pre-loaded scam & legit scripts
 python main.py --demo
 
+# Run live streaming audio pipeline simulation
+python test_audio_stream.py
+
 # Run comprehensive test suite with latency & accuracy metrics
 python test_layer1.py
 
@@ -58,6 +97,7 @@ python main.py --text "Aapka SIM card block ho jayega, abhi UPI PIN dalo."
 Sentinel-AI/
 ├── scam_detector/            # Core Detection Engine
 │   ├── __init__.py           # Package exports & versioning
+│   ├── audio_chunker.py      # Audio ring buffer, VAD, sliding window & streaming ASR manager
 │   ├── detector.py           # Keyword & regex extraction with latency_ms timing
 │   ├── word_dictionary.py    # 11 weighted categories & Hinglish vocabulary
 │   ├── patterns.py           # Regex matchers for OTP, UPI PIN, Arrest Warrants
@@ -70,12 +110,13 @@ Sentinel-AI/
 │   ├── __init__.py
 │   └── sample_scripts.py     # India-specific scam, legit & telemarket scripts
 ├── main.py                   # Interactive CLI interface & demo runner
+├── test_audio_stream.py      # Live streaming audio pipeline simulation test
 ├── test_layer1.py            # Comprehensive evaluation test runner
 ├── test_summary.py           # Visual progress bar test summary
 ├── test_quick.py             # Fast assertion test script
 ├── test_mini.py              # Minimal quick check script
 ├── layer1_results.txt        # UTF-8 encoded test output log
-├── requirements.txt          # Dependencies (PyTorch, Transformers, Scikit-Learn)
+├── requirements.txt          # Dependencies (PyTorch, Transformers, Scikit-Learn, NumPy)
 └── README.md                 # Project documentation
 ```
 
@@ -108,6 +149,16 @@ Sentinel-AI/
 
 ---
 
+## 📱 Edge-Optimized ASR Recommendations
+
+| ASR Model | Execution Target | Memory Footprint | RTF (Real-Time Factor) | Best Suited For |
+|-----------|------------------|------------------|------------------------|-----------------|
+| **Moonshine-Tiny (ONNX INT8)** | Snapdragon CPU / NPU | ~35 MB | $< 0.08$ | Sub-second streaming chunks on resource-constrained devices |
+| **Conformer-CTC Indic (INT8)** | Hexagon NPU / DSP | ~48 MB | $< 0.05$ | Multi-lingual Hinglish code-mixed phonetic accuracy |
+| **Whisper-Tiny.en (Q4_0 QNN)** | Snapdragon NPU | ~75 MB | $< 0.12$ | Multi-purpose English streaming transcription |
+
+---
+
 ## 🧪 Benchmark & Test Scripts Included
 
 ### Scam Threat Scripts (`data/sample_scripts.py`)
@@ -129,12 +180,13 @@ Sentinel-AI/
 
 ## 🛠️ Benchmark Results
 
-Run `python test_layer1.py` to reproduce performance metrics:
+Run `python test_layer1.py` and `python test_audio_stream.py` to reproduce performance metrics:
 
 - **Scam Detection Accuracy**: `7/7` (100%)
 - **Legitimate Call Accuracy**: `5/5` (100%)
 - **Sales Call FP Control**: `2/2` (100% Safe - No False Critical Alerts)
 - **Average Execution Speed**: **~2.1 ms per call**
+- **Live Stream Interception**: Real-time risk accumulation over 500ms audio chunks.
 
 ---
 
