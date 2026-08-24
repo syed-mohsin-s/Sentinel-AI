@@ -8,6 +8,8 @@ import time
 import numpy as np
 from typing import Callable, Dict, List, Optional
 from .streaming import StreamingScamDetector
+from .tier2_slm_judge import Tier2SLMJudge
+from .interception_hud import InterceptionHUD
 
 
 class AudioStreamChunker:
@@ -93,21 +95,31 @@ class AudioStreamChunker:
 class LiveCallAudioInterceptor:
     """
     Live Stream Orchestrator
-    Streams raw PCM chunks -> AudioStreamChunker -> ASR Engine -> StreamingScamDetector
+    Streams raw PCM chunks -> AudioStreamChunker -> ASR Engine -> StreamingScamDetector -> Tier2SLMJudge -> InterceptionHUD
     """
 
-    def __init__(self, asr_engine: Callable[[np.ndarray], str]):
+    def __init__(
+        self,
+        asr_engine: Callable[[np.ndarray], str],
+        telemetry_callback: Optional[Callable[[Dict], None]] = None,
+        use_npu: bool = False
+    ):
         """
         Args:
             asr_engine: Callable accepting 1D float32 audio array (16kHz) and returning text.
+            telemetry_callback: Optional callback for telemetry HUD dispatch.
+            use_npu: Whether Tier 2 SLM judge targets Snapdragon NPU execution provider.
         """
         self.chunker = AudioStreamChunker()
         self.asr_engine = asr_engine
         self.detector = StreamingScamDetector(window_size_words=150)
+        self.slm_judge = Tier2SLMJudge(use_npu=use_npu)
+        self.hud = InterceptionHUD(telemetry_callback=telemetry_callback)
 
     def on_audio_chunk_received(self, pcm_chunk_500ms: np.ndarray) -> Optional[Dict]:
         """
         Processes a live 500ms audio packet. Returns scam analysis if new speech is transcribed.
+        Triggers Tier 2 Edge SLM Judge and HUD alert when risk threshold is crossed.
         """
         t0 = time.perf_counter()
 
@@ -128,5 +140,14 @@ class LiveCallAudioInterceptor:
         result = self.detector.process_chunk(new_transcript_delta)
         result["total_e2e_latency_ms"] = (time.perf_counter() - t0) * 1000
         result["transcript_delta"] = new_transcript_delta
+
+        # Step 5: Tier 2 Edge SLM Judge Integration
+        tier2_verdict = None
+        if result["cumulative_score"] >= 60.0 or result.get("needs_l2_review"):
+            tier2_verdict = self.slm_judge.evaluate_transcript(self.detector.full_transcript)
+            result["tier2_slm"] = tier2_verdict
+
+        # Step 6: HUD Alert Trigger
+        self.hud.trigger_alert(result, tier2_verdict)
 
         return result
