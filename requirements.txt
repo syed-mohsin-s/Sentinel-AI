@@ -1,12 +1,12 @@
 # Scam Call Detection System - Dependencies
 
-# Layer 1: TinyBERT (Required)
+# Layer 1: Core Machine Learning & Transformers
 torch>=2.0.0
 transformers>=4.30.0
+scikit-learn>=1.2.0
+numpy>=1.24.0
 
-# Optional: For faster tokenization
+# Optional: For faster tokenization and SLM support
 # tokenizers>=0.13.0
-
-# Future: Layer 2 SLM options
-# llama-cpp-python   # For Phi-2, Gemma, etc.
+# llama-cpp-python   # For Layer 2 SLM (Phi-2, Gemma 3 270M)
 # bitsandbytes       # For quantization

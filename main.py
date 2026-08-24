@@ -4,7 +4,10 @@ Main entry point for testing and analyzing text.
 """
 
 import sys
-from scam_detector import ScamDetector, RiskScorer
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+from scam_detector import ScamDetector, RiskScorer, EnsembleScorer, StreamingScamDetector
 from data.sample_scripts import get_all_scripts, get_script_by_name
 
 
@@ -12,8 +15,8 @@ def print_banner():
     """Print application banner."""
     banner = """
 ╔══════════════════════════════════════════════════════════════╗
-║           🔍 SCAM CALL DETECTION SYSTEM v1.0 🔍              ║
-║         Detect suspicious words and scam patterns            ║
+║           🔍 SCAM CALL DETECTION SYSTEM v2.0 🔍              ║
+║    Detect Digital Arrest, UPI Coercion & Fraud Patterns      ║
 ╚══════════════════════════════════════════════════════════════╝
     """
     print(banner)
@@ -21,27 +24,19 @@ def print_banner():
 
 def analyze_text(text: str, title: str = "Input Text"):
     """Analyze text and print results."""
-    detector = ScamDetector()
-    scorer = RiskScorer()
+    scorer = EnsembleScorer()
     
     print(f"\n{'='*60}")
     print(f"📝 Analyzing: {title}")
     print(f"{'='*60}")
     
-    # Show preview of text
     preview = text[:200].strip().replace('\n', ' ')
     if len(text) > 200:
         preview += "..."
     print(f"\nText Preview: \"{preview}\"")
     
-    # Run analysis
-    analysis = detector.analyze(text)
-    
-    # Print detection results
-    print(detector.get_detection_summary(analysis))
-    
-    # Print risk score
-    print(scorer.get_score_report(analysis))
+    analysis = scorer.analyze(text)
+    print(scorer.get_report(analysis))
     
     return analysis
 
@@ -49,32 +44,29 @@ def analyze_text(text: str, title: str = "Input Text"):
 def run_demo():
     """Run demo with sample scripts."""
     print("\n" + "="*60)
-    print("🎭 DEMO MODE - Testing with Sample Scripts")
+    print("🎭 DEMO MODE - Testing India-Specific & Core Scripts")
     print("="*60)
     
     all_scripts = get_all_scripts()
     
-    # Test scam scripts
     print("\n\n" + "🚨 "*20)
-    print("TESTING SCAM SCRIPTS (should show HIGH/CRITICAL risk)")
+    print("TESTING SCAM SCRIPTS (Digital Arrest, UPI PIN, Fake KYC, IRS)")
     print("🚨 "*20)
     
     for name, script in all_scripts["scam"].items():
         analyze_text(script, f"SCAM: {name}")
         print("\n" + "-"*60)
     
-    # Test legitimate scripts
     print("\n\n" + "✅ "*20)
-    print("TESTING LEGITIMATE SCRIPTS (should show LOW risk)")
+    print("TESTING LEGITIMATE SCRIPTS & CONTROLS")
     print("✅ "*20)
     
     for name, script in all_scripts["legitimate"].items():
         analyze_text(script, f"LEGITIMATE: {name}")
         print("\n" + "-"*60)
     
-    # Test borderline scripts
     print("\n\n" + "⚠️ "*20)
-    print("TESTING BORDERLINE SCRIPTS (may show MEDIUM risk)")
+    print("TESTING BORDERLINE & TELEMARKETING SCRIPTS (False Positive Control)")
     print("⚠️ "*20)
     
     for name, script in all_scripts["borderline"].items():
@@ -86,7 +78,7 @@ def interactive_mode():
     """Run interactive text analysis mode."""
     print("\n" + "="*60)
     print("💬 INTERACTIVE MODE")
-    print("Enter text to analyze (type 'quit' to exit, 'demo' for demo)")
+    print("Enter text to analyze (type 'quit' to exit, 'demo' for demo, 'stream' for live simulation)")
     print("="*60)
     
     while True:
@@ -141,7 +133,6 @@ def main():
     print_banner()
     
     if len(sys.argv) > 1:
-        # Command line arguments
         if sys.argv[1] == "--demo":
             run_demo()
         elif sys.argv[1] == "--file":
@@ -169,11 +160,9 @@ def main():
             print("  python main.py --file PATH  # Analyze text file")
             print("  python main.py --text TEXT  # Analyze provided text")
         else:
-            # Treat as text input
             text = " ".join(sys.argv[1:])
             analyze_text(text, "Command Line Input")
     else:
-        # Interactive mode
         interactive_mode()
 
 
