@@ -142,8 +142,12 @@ class LiveCallAudioInterceptor:
         result["transcript_delta"] = new_transcript_delta
 
         # Step 5: Tier 2 Edge SLM Judge Integration
+        # Use max(current_score, peak_score) to prevent gate trigger starvation:
+        # if an attacker establishes authority early then goes quiet, the peak
+        # score preserves that threat momentum even as the window decays.
         tier2_verdict = None
-        if result["cumulative_score"] >= 60.0 or result.get("needs_l2_review"):
+        effective_threat = max(result["cumulative_score"], result["peak_score"])
+        if effective_threat >= 60.0 or result.get("needs_l2_review"):
             tier2_verdict = self.slm_judge.evaluate_transcript(self.detector.full_transcript)
             result["tier2_slm"] = tier2_verdict
 
