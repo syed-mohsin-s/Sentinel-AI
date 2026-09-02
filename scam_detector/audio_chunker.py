@@ -96,7 +96,17 @@ class LiveCallAudioInterceptor:
     """
     Live Stream Orchestrator
     Streams raw PCM chunks -> AudioStreamChunker -> ASR Engine -> StreamingScamDetector -> Tier2SLMJudge -> InterceptionHUD
+
+    Tier 2 Debounce Policy:
+        The SLM judge is expensive (~100ms+ with real weights).  To avoid a
+        re-trigger storm where every post-breach chunk invokes the judge, we
+        latch after the first invocation and only re-invoke when:
+          • A new threat category appears that wasn't in the initial verdict.
+          • The score crosses a higher severity band (e.g., HIGH -> CRITICAL).
     """
+
+    # Severity bands used for re-trigger gating
+    _SEVERITY_BANDS = [(75.0, "CRITICAL"), (50.0, "HIGH"), (25.0, "MEDIUM"), (0.0, "LOW")]
 
     def __init__(
         self,
@@ -115,6 +125,46 @@ class LiveCallAudioInterceptor:
         self.detector = StreamingScamDetector(window_size_words=150)
         self.slm_judge = Tier2SLMJudge(use_npu=use_npu)
         self.hud = InterceptionHUD(telemetry_callback=telemetry_callback)
+
+        # ── Tier 2 debounce state ───────────────────────────────────
+        self._tier2_triggered: bool = False
+        self._tier2_cached_verdict: Optional[Dict] = None
+        self._tier2_seen_categories: set = set()
+        self._tier2_severity_band: str = "LOW"
+
+    def _get_severity_band(self, score: float) -> str:
+        """Map a score to its severity band."""
+        for threshold, band in self._SEVERITY_BANDS:
+            if score >= threshold:
+                return band
+        return "LOW"
+
+    def _should_retrigger_tier2(self, result: Dict) -> bool:
+        """
+        Determine whether a new Tier 2 invocation is warranted.
+
+        Returns True if:
+          1. Tier 2 has never fired (first breach).
+          2. New threat categories have appeared since the last invocation.
+          3. The effective score has crossed into a higher severity band.
+        """
+        if not self._tier2_triggered:
+            return True
+
+        # Check for new categories not seen by the previous Tier 2 run
+        current_cats = set(result.get("categories_triggered", []))
+        new_cats = current_cats - self._tier2_seen_categories
+        if new_cats:
+            return True
+
+        # Check for severity band escalation
+        effective_threat = max(result["cumulative_score"], result["peak_score"])
+        current_band = self._get_severity_band(effective_threat)
+        band_order = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+        if band_order.get(current_band, 0) > band_order.get(self._tier2_severity_band, 0):
+            return True
+
+        return False
 
     def on_audio_chunk_received(self, pcm_chunk_500ms: np.ndarray) -> Optional[Dict]:
         """
@@ -138,20 +188,40 @@ class LiveCallAudioInterceptor:
 
         # Step 4: Stream transcript delta into Layer 1 ensemble detector
         result = self.detector.process_chunk(new_transcript_delta)
-        result["total_e2e_latency_ms"] = (time.perf_counter() - t0) * 1000
         result["transcript_delta"] = new_transcript_delta
 
-        # Step 5: Tier 2 Edge SLM Judge Integration
-        # Use max(current_score, peak_score) to prevent gate trigger starvation:
-        # if an attacker establishes authority early then goes quiet, the peak
-        # score preserves that threat momentum even as the window decays.
+        # Step 5: Tier 2 Edge SLM Judge Integration (with debounce latch)
+        # Use max(current_score, peak_score) to prevent gate trigger starvation.
         tier2_verdict = None
         effective_threat = max(result["cumulative_score"], result["peak_score"])
+
         if effective_threat >= 60.0 or result.get("needs_l2_review"):
-            tier2_verdict = self.slm_judge.evaluate_transcript(self.detector.full_transcript)
+            if self._should_retrigger_tier2(result):
+                # Full SLM invocation — pass the complete transcript so the
+                # judge always has full context, not the decayed sliding window.
+                tier2_verdict = self.slm_judge.evaluate_transcript(
+                    self.detector.full_transcript
+                )
+
+                # Update debounce state
+                self._tier2_triggered = True
+                self._tier2_cached_verdict = tier2_verdict
+                self._tier2_seen_categories |= set(
+                    result.get("categories_triggered", [])
+                )
+                self._tier2_severity_band = self._get_severity_band(effective_threat)
+                result["tier2_source"] = "invoked"
+            else:
+                # Reuse the cached verdict — no SLM call, zero extra latency.
+                tier2_verdict = self._tier2_cached_verdict
+                result["tier2_source"] = "cached"
+
             result["tier2_slm"] = tier2_verdict
 
         # Step 6: HUD Alert Trigger
         self.hud.trigger_alert(result, tier2_verdict)
+
+        # Capture total E2E latency AFTER all steps (including Tier 2 SLM)
+        result["total_e2e_latency_ms"] = (time.perf_counter() - t0) * 1000
 
         return result

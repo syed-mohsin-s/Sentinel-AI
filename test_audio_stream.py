@@ -65,7 +65,8 @@ def test_live_stream():
             
             if "tier2_slm" in result:
                 slm = result["tier2_slm"]
-                print(f"    🧠 [Tier 2 SLM Verdict]: Threat={slm['threat_type']} | Confidence={slm['confidence']*100:.0f}% | Action={slm['recommended_action']}")
+                source = result.get("tier2_source", "unknown")
+                print(f"    🧠 [Tier 2 SLM ({source})]: Threat={slm['threat_type']} | Confidence={slm['confidence']*100:.0f}% | Action={slm['recommended_action']}")
             print()
 
 
