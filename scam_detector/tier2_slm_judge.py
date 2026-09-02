@@ -60,12 +60,17 @@ class Tier2SLMJudge:
             try:
                 from transformers import pipeline
                 print(f"Loading local SLM model: {self.model_path}...")
-                self.pipeline = pipeline(
-                    "text-generation",
-                    model=self.model_path,
-                    device_map="auto",
-                    torch_dtype="auto"
-                )
+                try:
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model_path,
+                        device_map="auto"
+                    )
+                except Exception:
+                    self.pipeline = pipeline(
+                        "text-generation",
+                        model=self.model_path
+                    )
                 self.active_backend = f"Transformers ({self.model_path})"
                 self.is_loaded = True
                 return
