@@ -112,18 +112,21 @@ class LiveCallAudioInterceptor:
         self,
         asr_engine: Callable[[np.ndarray], str],
         telemetry_callback: Optional[Callable[[Dict], None]] = None,
-        use_npu: bool = False
+        use_npu: bool = True,
+        slm_backend: str = "auto"
     ):
         """
         Args:
             asr_engine: Callable accepting 1D float32 audio array (16kHz) and returning text.
             telemetry_callback: Optional callback for telemetry HUD dispatch.
             use_npu: Whether Tier 2 SLM judge targets Snapdragon NPU execution provider.
+            slm_backend: Backend for Tier 2 SLM judge. Options: "auto", "litert",
+                "transformers", "ollama", "llama_cpp", "onnx_genai", "heuristic".
         """
         self.chunker = AudioStreamChunker()
         self.asr_engine = asr_engine
         self.detector = StreamingScamDetector(window_size_words=150)
-        self.slm_judge = Tier2SLMJudge(use_npu=use_npu)
+        self.slm_judge = Tier2SLMJudge(use_npu=use_npu, backend=slm_backend)
         self.hud = InterceptionHUD(telemetry_callback=telemetry_callback)
 
         # ── Tier 2 debounce state ───────────────────────────────────

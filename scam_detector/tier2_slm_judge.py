@@ -1,15 +1,17 @@
 """
 Tier 2 Edge SLM Judge
-Executes local SLMs (Qwen2.5 / Gemma 3 / Llama 3.2) via HuggingFace Transformers,
-Ollama, llama-cpp-python (GGUF), ONNX Runtime GenAI, or fast NPU heuristic fallback.
+Executes local SLMs (Gemma 3 1B-IT / Qwen2.5 / Llama 3.2) via LiteRT-LM,
+HuggingFace Transformers, Ollama, llama-cpp-python (GGUF), ONNX Runtime GenAI,
+or fast NPU heuristic fallback.
 Generates structured JSON coercion reasoning.
 
 Backend resolution order (when backend="auto"):
     1. llama-cpp-python — loads a quantized GGUF file (on-device, preferred)
-    2. ONNX Runtime GAI — loads an ONNX-exported model directory
-    3. Ollama           — queries localhost:11434
-    4. Transformers     — loads a full HuggingFace model
-    5. Heuristic mock   — always-available keyword fallback
+    2. ONNX Runtime GenAI — loads an ONNX-exported model directory
+    3. LiteRT-LM        — Google edge runtime (Gemma3-1B-IT .litertlm)
+    4. Ollama            — queries localhost:11434
+    5. Transformers      — loads a full HuggingFace model
+    6. Heuristic mock    — always-available keyword fallback
 """
 
 import json
@@ -22,23 +24,25 @@ from typing import Dict, Optional
 class Tier2SLMJudge:
     """
     Tier 2 Edge SLM Reasoning Engine.
-    Supports live HuggingFace Transformers pipeline, Ollama API,
-    llama-cpp-python GGUF, ONNX Runtime GenAI, and fast NPU heuristic fallback.
+    Supports LiteRT-LM (Gemma3-1B-IT), HuggingFace Transformers pipeline,
+    Ollama API, llama-cpp-python GGUF, ONNX Runtime GenAI, and fast NPU
+    heuristic fallback.
     """
 
     def __init__(
         self,
         model_path: Optional[str] = None,
         use_npu: bool = False,
-        backend: str = "auto"  # Options: "auto", "transformers", "ollama", "llama_cpp", "onnx_genai", "heuristic"
+        backend: str = "auto"  # Options: "auto", "litert", "transformers", "ollama", "llama_cpp", "onnx_genai", "heuristic"
     ):
-        self.model_path = model_path or "Qwen/Qwen2.5-0.5B-Instruct"
+        self.model_path = model_path or "litert-community/Gemma3-1B-IT"
         self.use_npu = use_npu
         self.backend = backend
         self.pipeline = None
         self._llama_model = None
         self._onnx_model = None
         self._onnx_tokenizer = None
+        self._litert_engine = None
         self.is_loaded = False
         self.active_backend = "Heuristic (NPU Simulator)"
         self._last_used_npu = False  # Tracks what actually happened, not what was requested
@@ -87,7 +91,12 @@ ws     ::= [ \t\n]*
             if self._try_load_onnx_genai():
                 return
 
-        # 3. Ollama API endpoint (external daemon — may hijack inference if
+        # 3. LiteRT-LM (Google edge runtime — Gemma3-1B-IT)
+        if self.backend in ["auto", "litert"]:
+            if self._try_load_litert():
+                return
+
+        # 4. Ollama API endpoint (external daemon — may hijack inference if
         #    an unrelated Ollama instance is running in the background)
         if self.backend in ["auto", "ollama"]:
             try:
@@ -100,8 +109,7 @@ ws     ::= [ \t\n]*
             except Exception:
                 pass
 
-        # 4. Check Transformers Pipeline (optional local load)
-        # 4. HuggingFace Transformers (heavy, slow on CPU)
+        # 5. HuggingFace Transformers (heavy, slow on CPU)
         if self.backend in ["auto", "transformers"]:
             try:
                 from transformers import pipeline
@@ -123,11 +131,58 @@ ws     ::= [ \t\n]*
             except Exception as e:
                 print(f"Transformers model load fallback: {e}")
 
-        # 5. Default — ultra-fast NPU Heuristic Simulator (always available)
+        # 6. Default — ultra-fast NPU Heuristic Simulator (always available)
         self.active_backend = "Heuristic (NPU Simulator)"
         self.is_loaded = True
 
     # ─── Backend Loaders ────────────────────────────────────────────
+
+    def _try_load_litert(self) -> bool:
+        """Attempt to load a Gemma3-1B-IT model via LiteRT-LM (Google edge runtime)."""
+        try:
+            import litert_lm
+        except ImportError:
+            return False
+
+        litert_path = os.environ.get("SENTINEL_LITERT_PATH", "")
+        if not litert_path:
+            # Check if model_path points to a .litertlm file
+            if self.model_path.endswith(".litertlm") and os.path.isfile(self.model_path):
+                litert_path = self.model_path
+            else:
+                # Default: check models/ directory
+                default_path = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "models", "gemma3-1b-it.litertlm"
+                )
+                if os.path.isfile(default_path):
+                    litert_path = default_path
+
+        if not litert_path or not os.path.isfile(litert_path):
+            return False
+
+        try:
+            # Select hardware backend: NPU/GPU if requested, CPU otherwise
+            if self.use_npu:
+                try:
+                    backend = litert_lm.Backend.NPU()
+                except Exception:
+                    try:
+                        backend = litert_lm.Backend.GPU()
+                    except Exception:
+                        backend = litert_lm.Backend.CPU()
+            else:
+                backend = litert_lm.Backend.CPU()
+
+            self._litert_engine = litert_lm.Engine(litert_path, backend=backend)
+            self.active_backend = f"LiteRT-LM (Gemma3-1B-IT, {os.path.basename(litert_path)})"
+            self.is_loaded = True
+            print(f"LiteRT-LM engine loaded: {litert_path}")
+            return True
+        except Exception as e:
+            print(f"LiteRT-LM load failed: {e}")
+            self._litert_engine = None
+            return False
 
     def _try_load_llama_cpp(self) -> bool:
         """Attempt to load a GGUF model via llama-cpp-python."""
@@ -198,7 +253,12 @@ ws     ::= [ \t\n]*
             self.load_model()
 
         # Route to active backend
-        if "Ollama" in self.active_backend:
+        if "LiteRT" in self.active_backend:
+            slm_verdict = self._query_litert(transcript_window)
+            # LiteRT-LM: NPU if Backend.NPU() was selected during load
+            self._last_used_npu = self.use_npu and self._litert_engine is not None
+            self._last_backend = "litert"
+        elif "Ollama" in self.active_backend:
             slm_verdict = self._query_ollama(transcript_window)
             self._last_used_npu = False  # Ollama does not configure an NPU provider
             self._last_backend = "ollama"
@@ -229,6 +289,55 @@ ws     ::= [ \t\n]*
         return slm_verdict
 
     # ─── Backend Query Methods ──────────────────────────────────────
+
+    def _query_litert(self, transcript: str) -> Dict:
+        """Run inference via LiteRT-LM Engine (Gemma3-1B-IT on-device).
+
+        Creates a conversation session, sends the transcript, and collects
+        the streamed response chunks into a complete JSON verdict.
+        """
+        import litert_lm
+
+        prompt = f'Analyze this call transcript:\n"{transcript}"'
+
+        try:
+            messages = [litert_lm.Message.system(self.system_prompt)]
+
+            with self._litert_engine.create_conversation(messages=messages) as conversation:
+                # Collect streaming chunks into full response
+                full_response = ""
+                for chunk in conversation.send_message_async(prompt):
+                    text = chunk.get("content", [{}])[0].get("text", "")
+                    full_response += text
+
+            # Extract JSON from response
+            json_str = full_response
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[-1].split("```")[0].strip()
+            elif "{" in json_str:
+                start = json_str.index("{")
+                depth, end = 0, start
+                for i in range(start, len(json_str)):
+                    if json_str[i] == "{":
+                        depth += 1
+                    elif json_str[i] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            end = i + 1
+                            break
+                json_str = json_str[start:end]
+
+            parsed = json.loads(json_str)
+            return {
+                "is_scam": bool(parsed.get("is_scam", True)),
+                "confidence": float(parsed.get("confidence", 0.95)),
+                "threat_type": str(parsed.get("threat_type", "SUSPICIOUS_COERCION")),
+                "intent_summary": str(parsed.get("intent_summary", "Social engineering detected.")),
+                "recommended_action": str(parsed.get("recommended_action", "DISCONNECT_AND_MUTE")),
+            }
+        except Exception as e:
+            print(f"LiteRT-LM inference fallback ({e})")
+            return self._mock_npu_inference(transcript)
 
     def _query_ollama(self, transcript: str) -> Dict:
         """Query local Ollama LLM endpoint."""

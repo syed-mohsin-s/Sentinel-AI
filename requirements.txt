@@ -6,11 +6,14 @@ transformers>=4.30.0
 scikit-learn>=1.2.0
 numpy>=1.24.0
 
-# Tier 2 SLM Local Inference (optional — pick one or both)
+# Tier 2 SLM Local Inference (optional — pick one or more)
+# LiteRT-LM for Gemma3-1B-IT on-device inference (recommended — Google edge runtime):
+litert-lm-api>=0.1.0
 # Install llama-cpp-python for GGUF quantized model inference:
 #   pip install llama-cpp-python>=0.2.0
 # Install onnxruntime-genai for ONNX Runtime GenAI inference:
 #   pip install onnxruntime-genai>=0.3.0
 
-# Weight download helper (optional — only needed for scripts/download_weights.py)
-# pip install huggingface_hub>=0.20.0
+# Weight download helper (needed for scripts/download_weights.py)
+huggingface_hub>=0.20.0
+
