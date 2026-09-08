@@ -7,7 +7,15 @@ __pycache__/
 env/
 venv/
 
-# Model weights (GGUF / ONNX) — download via scripts/download_weights.py
+# Model weights (GGUF / LiteRT / ONNX) — download via scripts/download_weights.py
 models/
 *.gguf
+*.litertlm
 *.onnx
+*.bin
+*_cache*
+
+# Test logs
+layer1_results.txt
+test_results.txt
+
