@@ -41,6 +41,8 @@ class Tier2SLMJudge:
         self._onnx_tokenizer = None
         self.is_loaded = False
         self.active_backend = "Heuristic (NPU Simulator)"
+        self._last_used_npu = False  # Tracks what actually happened, not what was requested
+        self._last_backend = "none"
 
         self.system_prompt = (
             "You are Sentinel AI, an edge-native real-time fraud judge. "
@@ -198,18 +200,31 @@ ws     ::= [ \t\n]*
         # Route to active backend
         if "Ollama" in self.active_backend:
             slm_verdict = self._query_ollama(transcript_window)
+            self._last_used_npu = False  # Ollama does not configure an NPU provider
+            self._last_backend = "ollama"
         elif "llama-cpp" in self.active_backend:
             slm_verdict = self._query_llama_cpp(transcript_window)
+            # llama-cpp-python: NPU only if real QNN offload is configured.
+            # Currently n_gpu_layers=0 (CPU-only), so always False.
+            self._last_used_npu = False
+            self._last_backend = "llama_cpp"
         elif "ONNX" in self.active_backend:
             slm_verdict = self._query_onnx_genai(transcript_window)
+            # ONNX GenAI: check if a QNN/NPU execution provider was actually used
+            self._last_used_npu = self._check_onnx_npu_provider()
+            self._last_backend = "onnx_genai"
         elif "Transformers" in self.active_backend and self.pipeline:
             slm_verdict = self._query_transformers(transcript_window)
+            self._last_used_npu = False  # Transformers does not configure an NPU provider
+            self._last_backend = "transformers"
         else:
             slm_verdict = self._mock_npu_inference(transcript_window)
+            self._last_used_npu = False  # Heuristic mock, no real NPU
+            self._last_backend = "heuristic"
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         slm_verdict["slm_latency_ms"] = elapsed_ms
-        slm_verdict["executed_on_npu"] = self.use_npu
+        slm_verdict["executed_on_npu"] = self._last_used_npu
         slm_verdict["backend"] = self.active_backend
         return slm_verdict
 
@@ -398,3 +413,16 @@ ws     ::= [ \t\n]*
             "recommended_action": "ALLOW_CALL"
         }
 
+    def _check_onnx_npu_provider(self) -> bool:
+        """Check whether the ONNX Runtime session is actually using a QNN/NPU execution provider."""
+        try:
+            import onnxruntime
+            # If model exposes a session, check its providers
+            if hasattr(self._onnx_model, 'session') and hasattr(self._onnx_model.session, 'get_providers'):
+                providers = self._onnx_model.session.get_providers()
+                npu_providers = {"QNNExecutionProvider", "DmlExecutionProvider"}
+                return bool(set(providers) & npu_providers)
+        except Exception:
+            pass
+        # Cannot confirm NPU provider — default to False (honest reporting)
+        return False

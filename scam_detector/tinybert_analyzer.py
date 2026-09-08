@@ -1,9 +1,11 @@
 """
 Semantic Analyzer
-Supports HuggingFace Transformer models (TinyBERT / Gemma-3-270M / BERT) with
-a calibrated TF-IDF vectorizer fallback.
+Calibrated TF-IDF vectorizer for scam-vs-legitimate semantic similarity scoring.
 
 Fixes raw cosine scaling miscalibration and incorporates India-specific scam vectors.
+
+# NOTE: real transformer backend (e.g. Gemma-3-270M fine-tuned classifier) is a
+# planned upgrade, not yet implemented. This is TF-IDF only.
 """
 
 import time
@@ -13,17 +15,17 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-class SemanticAnalyzer:
+class TfIdfSemanticAnalyzer:
     """
-    Semantic analyzer for scam detection.
-    Evaluates semantic similarity between input text and known scam/legitimate intent vectors.
+    TF-IDF semantic analyzer for scam detection.
+    Evaluates semantic similarity between input text and known scam/legitimate intent vectors
+    using calibrated TF-IDF cosine similarity.
     """
     
-    def __init__(self, model_name: str = "prajjwal1/bert-tiny"):
+    def __init__(self):
         """
-        Initialize the semantic analyzer.
+        Initialize the TF-IDF semantic analyzer.
         """
-        self.model_name = model_name
         self.vectorizer = None
         self.is_loaded = False
         self.backend = "TF-IDF (Calibrated)"
@@ -174,5 +176,8 @@ class SemanticAnalyzer:
         return "\n".join(lines)
 
 
-# Alias TinyBertAnalyzer to SemanticAnalyzer for backwards compatibility
-TinyBertAnalyzer = SemanticAnalyzer
+# Backwards-compatible aliases — existing code imports these names.
+# NOTE: "TinyBertAnalyzer" and "SemanticAnalyzer" are legacy names from when a
+# real transformer backend was planned. Both resolve to TfIdfSemanticAnalyzer.
+SemanticAnalyzer = TfIdfSemanticAnalyzer
+TinyBertAnalyzer = TfIdfSemanticAnalyzer
