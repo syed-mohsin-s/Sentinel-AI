@@ -66,7 +66,7 @@ def download_with_progress(url: str, dest_path: str):
                         mb_total = total / (1024 * 1024)
                         bar_len = 30
                         filled = int(bar_len * downloaded / total)
-                        bar = "█" * filled + "░" * (bar_len - filled)
+                        bar = "=" * filled + "-" * (bar_len - filled)
                         print(f"\r  [{bar}] {pct:5.1f}%  ({mb_done:.1f}/{mb_total:.1f} MB)", end="", flush=True)
                     else:
                         mb_done = downloaded / (1024 * 1024)
@@ -95,13 +95,13 @@ def download_litert_model():
 
     if os.path.exists(dest_path):
         size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-        print(f"  ⏭️  Already exists ({size_mb:.1f} MB), skipping.")
+        print(f"  [SKIP] Already exists ({size_mb:.1f} MB), skipping.")
         return True
 
     try:
         from huggingface_hub import hf_hub_download, list_repo_files
     except ImportError:
-        print("  ❌ huggingface_hub not installed. Install with:")
+        print("  [X] huggingface_hub not installed. Install with:")
         print("       pip install huggingface_hub>=0.20.0")
         return False
 
@@ -112,7 +112,7 @@ def download_litert_model():
         litert_files = [f for f in repo_files if f.endswith(".litertlm")]
 
         if not litert_files:
-            print(f"  ❌ No .litertlm files found in {LITERT_REPO}")
+            print(f"  [X] No .litertlm files found in {LITERT_REPO}")
             print(f"  Available files: {', '.join(repo_files[:10])}")
             return False
 
@@ -136,11 +136,11 @@ def download_litert_model():
             downloaded_path = final_path
 
         size_mb = os.path.getsize(downloaded_path) / (1024 * 1024)
-        print(f"  ✅ Saved: {downloaded_path} ({size_mb:.1f} MB)")
+        print(f"  [OK] Saved: {downloaded_path} ({size_mb:.1f} MB)")
         return True
 
     except Exception as e:
-        print(f"  ❌ Download failed: {e}")
+        print(f"  [X] Download failed: {e}")
         return False
 
 
@@ -155,7 +155,7 @@ def try_huggingface_hub_download(filename: str, model_info: dict, dest_path: str
             local_dir=MODELS_DIR,
             local_dir_use_symlinks=False,
         )
-        print(f"  ✅ Saved: {downloaded}")
+        print(f"  [OK] Saved: {downloaded}")
         return True
     except ImportError:
         return False
@@ -174,7 +174,7 @@ def download_gguf_models():
 
         if os.path.exists(dest_path):
             size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-            print(f"  ⏭️  Already exists ({size_mb:.1f} MB), skipping.")
+            print(f"  [SKIP] Already exists ({size_mb:.1f} MB), skipping.")
             continue
 
         # Try huggingface_hub first (resumable), fall back to urllib
